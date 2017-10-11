@@ -29,7 +29,7 @@ class srData(data.Dataset):
         Args:
             index (int): Index
         Returns:
-            tuple: (image, target) where target is class_index of the target class.
+            tuple: (lr_image, hr_image) for the given index
         """
         filename = self.names[index]
         lr_img = pil_loader(self.lr_root+filename)
