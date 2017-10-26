@@ -16,6 +16,9 @@ import numpy as np
 from PIL import Image
 from dataloader import *
 from model import *
+import sys
+
+sys.dont_write_bytecode = True
 
 """
 Options for training
@@ -46,6 +49,7 @@ print(opt)
 """
 Load experiments 
 """
+
 if opt.experiment is None:
     opt.experiment = 'samples'
 os.system('mkdir {0}'.format(opt.experiment))
@@ -66,8 +70,7 @@ lr_dir = "/scratch/jmw784/superresolution/data/lr/"
 hr_dir = "/scratch/jmw784/superresolution/data/hr/"
 dataset = srData(lr_dir, hr_dir, transform=transform)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
-                                         shuffle=True, num_workers=int(opt.workers),
-                                         drop_last=True)
+                                         shuffle=True, num_workers=int(opt.workers))
 
 ngpu = int(opt.ngpu)
 nc = int(opt.nc)
@@ -169,6 +172,11 @@ for epoch in range(opt.niter+1):
             j += 1
 
             lr, hr = data_iter.next()
+
+            # Drop the last batch if it's not the same size as the batchsize
+            if lr.size(0) != opt.batchSize:
+                break
+
             i += 1
 
             # train with real

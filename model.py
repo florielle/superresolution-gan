@@ -1,13 +1,16 @@
 import torch
 import torch.nn as nn
+import sys
+
+sys.dont_write_bytecode = True
 
 class SRGAN_D(nn.Module):
-    def __init__(self, ngpu):
+    def __init__(self, nc, ngpu):
         super(SRGAN_D, self).__init__()
         self.ngpu = ngpu
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout()
-        self.conv1 = nn.Conv2d(3, 64, 4, 2, 1, bias=True)
+        self.conv1 = nn.Conv2d(nc, 64, 4, 2, 1, bias=True)
         self.bn1 = nn.BatchNorm2d(64)
         self.conv2 = nn.Conv2d(64, 32, 4, 2, 1, bias=True)
         self.bn2 = nn.BatchNorm2d(32)
@@ -27,12 +30,12 @@ class SRGAN_D(nn.Module):
         return x
 
 class SRGAN_G(nn.Module):
-    def __init__(self, ngpu):
+    def __init__(self, nc, ngpu):
         super(SRGAN_G, self).__init__()
         self.ngpu = ngpu
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout()
-        self.conv1 = nn.Conv2d(3, 64, 5, 1, 2, bias=True)
+        self.conv1 = nn.Conv2d(nc, 64, 5, 1, 2, bias=True)
         self.bn1 = nn.BatchNorm2d(64)
         self.conv2 = nn.Conv2d(64, 64, 3, 1, 1, bias=True)
         self.bn2 = nn.BatchNorm2d(64)

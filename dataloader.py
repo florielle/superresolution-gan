@@ -3,6 +3,9 @@ import torch
 import torchvision.transforms as transforms
 import torch.utils.data as data
 from PIL import Image
+import sys
+
+sys.dont_write_bytecode = True
 
 def pil_loader(path):
     with open(path, 'rb') as f:
