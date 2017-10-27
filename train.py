@@ -16,9 +16,7 @@ import numpy as np
 from PIL import Image
 from dataloader import *
 from model import *
-import sys
-
-sys.dont_write_bytecode = True
+from comet_ml import Experiment
 
 """
 Options for training
@@ -26,7 +24,6 @@ Options for training
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=32, help='input batch size')
-parser.add_argument('--workers', type=int, help='number of data loading workers', default=2)
 parser.add_argument('--lrSize', type=int, default=64, help='the height / width of the low resolution image')
 parser.add_argument('--hrSize', type=int, default=256, help='the height / width of the high resolution image')
 parser.add_argument('--nc', type=int, default=3, help='input image channels')
@@ -45,6 +42,9 @@ parser.add_argument('--init', type=str, default='normal', help='initialization m
 opt = parser.parse_args()
 print(opt)
 
+experiment = Experiment(api_key="lN9B6VboZhaXa6TkJcdAZAfSf", log_code=True)
+hyper_params = vars(opt)
+experiment.log_multiple_params(hyper_params)
 
 """
 Load experiments 
@@ -70,7 +70,7 @@ lr_dir = "/scratch/jmw784/superresolution/data/lr/"
 hr_dir = "/scratch/jmw784/superresolution/data/hr/"
 dataset = srData(lr_dir, hr_dir, transform=transform)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
-                                         shuffle=True, num_workers=int(opt.workers))
+                                         shuffle=True)
 
 ngpu = int(opt.ngpu)
 nc = int(opt.nc)
@@ -125,19 +125,9 @@ if opt.netD != '':
 print(netD)
 
 
-# Predefine tensor sizes and turn to cuda if needed
-lr_input = torch.FloatTensor(opt.batchSize, nc, opt.lrSize, opt.lrSize)
-hr_target = torch.FloatTensor(opt.batchSize, nc, opt.hrSize, opt.hrSize)
-one = torch.FloatTensor([1])
-mone = one * -1
-
 if opt.cuda:
     netD.cuda()
     netG.cuda()
-    lr_img = lr_img.cuda()
-    hr_img = hr_img.cuda()
-    one = one.cuda()
-    mone = mone.cuda()
 
 # Set up optimizer
 if opt.adam:
@@ -172,26 +162,26 @@ for epoch in range(opt.niter+1):
             j += 1
 
             lr, hr = data_iter.next()
+            i += 1
 
             # Drop the last batch if it's not the same size as the batchsize
             if lr.size(0) != opt.batchSize:
                 break
 
-            i += 1
+            if opt.cuda:
+                lr = lr.cuda()
+                hr = hr.cuda()
 
             # train with real
 
             netD.zero_grad()
 
-            lr_input.resize_as_(lr).copy_(lr)
-            hr_target.resize_as_(hr).copy_(hr)
-
-            inputy = Variable(hr_target)
+            inputy = Variable(hr)
 
             errD_real = netD(inputy) # can modify to feed inputv too
 
             # completely freeze netG while we train the discriminator
-            inputg = Variable(lr_input, volatile = True)
+            inputg = Variable(lr, volatile = True)
             fake = Variable(netG(inputg).data)
 
             errD_fake = netD(fake)
@@ -209,28 +199,39 @@ for epoch in range(opt.niter+1):
             p.requires_grad = False # to avoid computation
         netG.zero_grad()
 
-        inputv = Variable(lr_input)
-        
-        fake = netG(inputv)
+        if opt.cuda:
+            lr = lr.cuda()
+            hr = hr.cuda()
+
+        input_lr = Variable(lr)
+        input_hr = Variable(hr)        
+
+        fake = netG(input_lr)
         errG_1 = netD(fake)
         errG = 0.5 * torch.mean((errG_1 - 1)**2)
 
         # generator accumulates loss from discriminator + MSE with true image
-        loss_G = errG + MSE(fake, inputy)
+        loss_MSE = MSE(fake, input_hr)
+        loss_G = errG + loss_MSE
         loss_G.backward()
 
         optimizerG.step()
         gen_iterations += 1
 
+        experiment.log_metric("MSE loss", loss_MSE.data[0])
+        experiment.log_metric("Loss G", errG.data[0])
+        experiment.log_metric("Loss D", errD.data[0])
+
+
         print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f'
             % (epoch, opt.niter, i, len(dataloader), gen_iterations,
-            errD.data[0], errG.data[0]))
+            errD.data[0], loss_G.data[0]))
         if gen_iterations % 500 == 0:
             vutils.save_image(hr, '{0}/images/{1}_real.png'.format(opt.experiment, gen_iterations))
             fake = netG(Variable(lr, volatile=True))
             vutils.save_image(fake.data, '{0}/images/{1}_fake.png'.format(opt.experiment, gen_iterations))
 
     # do checkpointing
-    if epoch % 200 == 0:
+    if epoch % 50 == 0:
         torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch))
         torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch))
