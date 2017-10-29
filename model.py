@@ -21,10 +21,10 @@ class SRGAN_D(nn.Module):
         self.linear = nn.Linear(8*16*16, 1)
 
     def forward(self, x):
-        x = self.relu(self.dropout(self.bn1(self.conv1(x))))
-        x = self.relu(self.dropout(self.bn2(self.conv2(x))))
-        x = self.relu(self.dropout(self.bn3(self.conv3(x))))
-        x = self.relu(self.dropout(self.bn4(self.conv4(x))))
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.dropout(self.relu(self.bn2(self.conv2(x))))
+        x = self.dropout(self.relu(self.bn3(self.conv3(x))))
+        x = self.relu(self.bn4(self.conv4(x)))
         x = x.view(x.size(0), -1)
         x = self.linear(x)
         return x
@@ -46,9 +46,9 @@ class SRGAN_G(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, x):
-        x = self.relu(self.dropout(self.bn1(self.conv1(x))))
-        x = self.relu(self.dropout(self.bn2(self.conv2(x))))
-        x = self.relu(self.dropout(self.bn3(self.conv3(x))))
-        x = self.relu(self.dropout(self.pixel_shuffle(self.conv4(x))))
+        x = self.relu(self.bn1(self.conv1(x)))
+        x = self.dropout(self.relu(self.bn2(self.conv2(x))))
+        x = self.dropout(self.relu(self.bn3(self.conv3(x))))
+        x = self.relu(self.pixel_shuffle(self.conv4(x)))
         x = self.tanh(x)
         return x

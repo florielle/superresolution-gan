@@ -84,24 +84,22 @@ def weights_init(m):
     if classname.find('Conv') != -1:
         if opt.init == 'xavier':
             m.weight.data = init.xavier_normal(m.weight.data)
-            m.bias.data = init.xavier_normal(m.bias.data)
         elif opt.init == 'kaiming':
             m.weight.data = init.kaiming_normal(m.weight.data)
-            m.bias.data = init.kaiming_normal(m.bias.data)
         else:
             m.weight.data.normal_(0.0, 0.02)
-            m.bias.data.fill_(0)
+        
+        m.bias.data.fill_(0)
 
     elif classname.find('BatchNorm') != -1:
         if opt.init == 'xavier':
             m.weight.data = init.xavier_normal(m.weight.data)
-            m.bias.data = init.xavier_normal(m.bias.data)
         elif opt.init == 'kaiming':
             m.weight.data = init.kaiming_normal(m.weight.data)
-            m.bias.data = init.kaiming_normal(m.bias.data)
         else:
             m.weight.data.normal_(1.0, 0.02)
-            m.bias.data.fill_(0)
+        
+        m.bias.data.fill_(0)
 
 # Create model objects
 netG = SRGAN_G(nc, ngpu)
@@ -223,15 +221,17 @@ for epoch in range(opt.niter+1):
         experiment.log_metric("Loss D", errD.data[0])
 
 
-        print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f'
+        print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f, MSE_Loss: %f'
             % (epoch, opt.niter, i, len(dataloader), gen_iterations,
-            errD.data[0], loss_G.data[0]))
+            errD.data[0], loss_G.data[0], loss_MSE.data[0]))
         if gen_iterations % 500 == 0:
-            vutils.save_image(hr, '{0}/images/{1}_real.png'.format(opt.experiment, gen_iterations))
+            vutils.save_image(hr, '{0}/images/{1}_real.png'.format(opt.experiment, gen_iterations), normalize=True)
+            netG.eval()
             fake = netG(Variable(lr, volatile=True))
-            vutils.save_image(fake.data, '{0}/images/{1}_fake.png'.format(opt.experiment, gen_iterations))
+            netG.train()
+            vutils.save_image(fake.data, '{0}/images/{1}_fake.png'.format(opt.experiment, gen_iterations), normalize=True)
 
     # do checkpointing
-    if epoch % 50 == 0:
+    if epoch % 100 == 0:
         torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch))
         torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch))
