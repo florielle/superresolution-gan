@@ -52,26 +52,36 @@ class net_g(nn.Module):
 
 
 # discriminator
-# fix architecture ***
-# change input to be concatnated images
-
+    
 class net_d(nn.Module):
     """
     Discriminator
     """
     def __init__(self):
         super(net_d, self).__init__()
+#         self.relu = nn.ReLU()
+#         self.dropout = nn.Dropout2d(p=0.9)
+#         self.conv5 = nn.Conv2d(6, 32, (5, 5), (1, 1), (2, 2))
+#         self.conv6 = nn.Conv2d(32, 3, (3, 3), (1, 1), (1, 1))
+#         self.lin1 = nn.Linear(256, 1)
         self.relu = nn.ReLU()
-        self.conv5 = nn.Conv2d(6, 32, (5, 5), (1, 1), (2, 2))
-        self.conv6 = nn.Conv2d(32, 3, (3, 3), (1, 1), (1, 1))
-        self.lin1 = nn.Linear(256, 1)
+        self.dropout = nn.Dropout2d(p=0.9)
+        self.conv5 = nn.Conv1d(2000, 512, 2)
+        self.conv6 = nn.Conv1d(256, 32, 2)
+        self.lin0 = nn.Linear(196608, 2000)
 
-        
+
     def forward(self, data):
-        x = self.relu(self.conv5(data))
-        x = self.relu(self.conv6(x))
-        x = self.lin1(x)
-        return nn.functional.sigmoid(x.view((32, -1)))
+#         x = data
+#         x = self.dropout(x)
+#         x = self.relu(self.conv5(x))
+#         x = self.relu(self.conv6(x))
+#         x = self.lin1(x)
+        x = data.view(32,2,-1)
+        x = self.lin0(x)
+        x = self.dropout(x)
+        x = x.view(32, 2000, -1)
+        x = self.conv5(x)
+        x = self.relu(self.conv6(x.view(32, 256, -1)))
 
-    
-    
+        return nn.functional.sigmoid(x.view((32, -1)))

@@ -1,5 +1,7 @@
 ### epoch loops
 import torch
+import torch.backends.cudnn as cudnn
+
 import numpy as np
 import torch
 import os
@@ -15,11 +17,11 @@ from torch.autograd import Variable
 from PIL import Image
 import numpy as np
 from dataloader import srData, pil_loader, name_list
-
 import random
 from pdb import set_trace as st
-
 from model import net_g, net_d
+
+cudnn.benchmark = True
 
 lr_dir = "/scratch/mmd378/DSGA1013/project/data/lr/"
 hr_dir = "/scratch/mmd378/DSGA1013/project/data/hr/"
@@ -106,6 +108,9 @@ if __name__ == '__main__':
     l_rate = 0.001
     G = net_g()
     D = net_d()
+    net_d.cuda()
+    net_g.cuda()
+
     beta_1 = 0.5
     criterionGAN = GANLoss()
     criterionL1 = torch.nn.L1Loss()
