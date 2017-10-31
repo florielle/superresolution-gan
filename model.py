@@ -31,10 +31,10 @@ class SRGAN_D(nn.Module):
             x = self.dropout(self.relu(self.bn3(self.conv3(x))))
             x = self.relu(self.bn4(self.conv4(x)))
         else:
-            x = self.relu(self.bn1(self.conv1(x)))
-            x = self.dropout(self.relu(self.bn2(self.conv2(x))))
-            x = self.dropout(self.relu(self.bn3(self.conv3(x))))
-            x = self.relu(self.bn4(self.conv4(x)))
+            x = self.relu(self.conv1(x))
+            x = self.dropout(self.relu(self.conv2(x)))
+            x = self.dropout(self.relu(self.conv3(x)))
+            x = self.relu(self.conv4(x))
 
         x = x.view(x.size(0), -1)
         x = self.linear(x)
