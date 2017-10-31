@@ -40,6 +40,7 @@ parser.add_argument('--experiment', default=None, help='Where to store samples a
 parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is rmsprop)')
 parser.add_argument('--init', type=str, default='normal', help='initialization method (normal, xavier, kaiming)')
 parser.add_argument('--Dweight', type=float, default=1.0, help='weighting for G loss from D') 
+parser.add_argument('--bn', action='store_true', help='Whether to use batch norm or not')
 opt = parser.parse_args()
 print(opt)
 
@@ -103,11 +104,11 @@ def weights_init(m):
         m.bias.data.fill_(0)
 
 # Create model objects
-netG = SRGAN_G(nc, ngpu)
+netG = SRGAN_G(nc, ngpu, opt.bn)
 netG.apply(weights_init)
 netG.train()
 
-netD = SRGAN_D(nc, ngpu)
+netD = SRGAN_D(nc, ngpu, opt.bn)
 netD.apply(weights_init)
 netD.train()
 
