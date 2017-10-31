@@ -41,7 +41,7 @@ dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 # that has the same size as the input
 class GANLoss(nn.Module):
     def __init__(self, use_lsgan=True, target_real_label=1.0, target_fake_label=0.0,
-                 tensor=torch.FloatTensor):
+                 tensor=torch.cuda.FloatTensor):
         super(GANLoss, self).__init__()
         self.real_label = target_real_label
         self.fake_label = target_fake_label
@@ -100,7 +100,7 @@ class ImagePool():
                     self.images[random_id] = image
                     return_images.append(tmp)
                 else:
-                    return_images.append(image)
+                    return_images.append(image.cuda())
         return_images = Variable(torch.cat(return_images, 0))
         return return_images
 
@@ -133,7 +133,8 @@ if __name__ == '__main__':
                 real_lr_small, real_hr = Variable(batch[0].cuda()), Variable(batch[1].cuda())
                 #torch.Size([32, 3, 64, 64]) torch.Size([32, 3, 256, 256])
                 # forward step
-                fake_hr = G.forward(real_lr_small)
+                fake_hr = G(real_lr_small)
+                fake_hr.data = fake_hr.data.cuda()
 
 
                 # get padded version of real_lr
@@ -144,8 +145,8 @@ if __name__ == '__main__':
                 # Optimize step 
                 optimizer_D.zero_grad()
                 print("here1")
-                print(type(real_lr))
-                print(type(fake_hr))
+                print("real", type(real_lr.data))
+                print("fake", type(fake_hr.data))
                 # backward_D()
                 fake_lrhr = fake_lrhr_pool.query(torch.cat((real_lr, fake_hr), 1))
                 pred_fake = D.forward(fake_lrhr.detach(), batchnorm=False)
