@@ -39,6 +39,7 @@ parser.add_argument('--Diters', type=int, default=5, help='number of D iters per
 parser.add_argument('--experiment', default=None, help='Where to store samples and models')
 parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is rmsprop)')
 parser.add_argument('--init', type=str, default='normal', help='initialization method (normal, xavier, kaiming)')
+parser.add_argument('--Dweight', type=float, default=1.0, help='weighting for G loss from D') 
 opt = parser.parse_args()
 print(opt)
 
@@ -210,7 +211,7 @@ for epoch in range(opt.niter+1):
 
         # generator accumulates loss from discriminator + MSE with true image
         loss_MSE = MSE(fake, input_hr)
-        loss_G = errG + loss_MSE
+        loss_G = opt.Dweight*errG + loss_MSE
         loss_G.backward()
 
         optimizerG.step()

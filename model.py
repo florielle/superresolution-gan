@@ -49,6 +49,6 @@ class SRGAN_G(nn.Module):
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.dropout(self.relu(self.bn2(self.conv2(x))))
         x = self.dropout(self.relu(self.bn3(self.conv3(x))))
-        x = self.relu(self.pixel_shuffle(self.conv4(x)))
+        x = self.pixel_shuffle(self.conv4(x))
         x = self.tanh(x)
         return x
