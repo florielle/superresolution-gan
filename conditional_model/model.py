@@ -16,6 +16,9 @@ from torch.autograd import Variable
 from PIL import Image
 import numpy as np
 from dataloader import srData, pil_loader, name_list
+import torch.nn.parallel
+import torch.backends.cudnn as cudnn
+cudnn.benchmark = True
 
 
 # generator

@@ -16,6 +16,11 @@ from PIL import Image
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
+import torch.nn.parallel
+import torch.backends.cudnn as cudnn
+cudnn.benchmark = True
+
+
 import numpy as np
 from dataloader import srData, pil_loader, name_list
 
