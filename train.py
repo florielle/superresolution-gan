@@ -2,6 +2,7 @@ import argparse
 import random
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
@@ -15,7 +16,6 @@ import os
 import numpy as np
 from PIL import Image
 from dataloader import *
-from model import *
 from comet_ml import Experiment
 
 """
@@ -27,7 +27,7 @@ parser.add_argument('--batchSize', type=int, default=32, help='input batch size'
 parser.add_argument('--lrSize', type=int, default=64, help='the height / width of the low resolution image')
 parser.add_argument('--hrSize', type=int, default=256, help='the height / width of the high resolution image')
 parser.add_argument('--nc', type=int, default=3, help='input image channels')
-parser.add_argument('--niter', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--niter', type=int, default=4000, help='number of epochs to train for')
 parser.add_argument('--lrD', type=float, default=0.00005, help='learning rate for Critic, default=0.00005')
 parser.add_argument('--lrG', type=float, default=0.00005, help='learning rate for Generator, default=0.00005')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
@@ -41,6 +41,7 @@ parser.add_argument('--adam', action='store_true', help='Whether to use adam (de
 parser.add_argument('--init', type=str, default='normal', help='initialization method (normal, xavier, kaiming)')
 parser.add_argument('--Dweight', type=float, default=1.0, help='weighting for G loss from D') 
 parser.add_argument('--bn', action='store_true', help='Whether to use batch norm or not')
+parser.add_argument('--nonlinearity', type=str, default='relu', help='Nonlinearity to use (selu, prelu, leaky, relu)')
 opt = parser.parse_args()
 print(opt)
 
@@ -103,12 +104,104 @@ def weights_init(m):
         
         m.bias.data.fill_(0)
 
+# Define model
+class SRGAN_D(nn.Module):
+    def __init__(self, nc, ngpu, bn, nonlinearity):
+        super(SRGAN_D, self).__init__()
+        self.bn = bn
+        self.ngpu = ngpu
+
+        if nonlinearity == 'selu':
+            self.relu = nn.SELU()
+        elif nonlinearity == 'prelu':
+            self.relu = nn.PReLU()
+        elif nonlinearity == 'leaky':
+            self.relu = nn.LeakyReLU()
+        else:
+            self.relu = nn.ReLU()
+
+        self.dropout = nn.Dropout()
+        self.conv1 = nn.Conv2d(nc, 64, 4, 2, 1, bias=True)
+        self.conv2 = nn.Conv2d(64, 128, 4, 2, 1, bias=True)
+        self.conv3 = nn.Conv2d(128, 64, 4, 2, 1, bias=True)
+        self.conv4 = nn.Conv2d(64, 32, 4, 2, 1, bias=True)
+        
+        if self.bn:
+            self.bn1 = nn.BatchNorm2d(64)
+            self.bn2 = nn.BatchNorm2d(128)
+            self.bn3 = nn.BatchNorm2d(64)
+            self.bn4 = nn.BatchNorm2d(32)
+
+        self.linear = nn.Linear(8192, 1)
+
+    def forward(self, x):
+        if self.bn:
+            x = self.bn1(self.relu(self.conv1(x)))
+            x = self.dropout(self.bn2(self.relu(self.conv2(x))))
+            x = self.dropout(self.bn3(self.relu(self.conv3(x))))
+            x = self.bn4(self.relu(self.conv4(x)))
+        else:
+            x = self.relu(self.conv1(x))
+            x = self.dropout(self.relu(self.conv2(x)))
+            x = self.dropout(self.relu(self.conv3(x)))
+            x = self.relu(self.conv4(x))
+
+        x = x.view(x.size(0), -1)
+        x = self.linear(x)
+        
+        return x
+
+class SRGAN_G(nn.Module):
+    def __init__(self, nc, ngpu, bn, nonlinearity):
+        super(SRGAN_G, self).__init__()
+        self.bn = bn
+        self.ngpu = ngpu
+
+        if nonlinearity == 'selu':
+            self.relu = nn.SELU()
+        elif nonlinearity == 'prelu':
+            self.relu = nn.PReLU()
+        elif nonlinearity == 'leaky':
+            self.relu = nn.LeakyReLU()
+        else:
+            self.relu = nn.ReLU()
+
+        self.dropout = nn.Dropout()
+        self.conv1 = nn.Conv2d(nc, 64, 5, 1, 2, bias=True)
+        self.conv2 = nn.Conv2d(64, 128, 3, 1, 1, bias=True)
+        self.conv3 = nn.Conv2d(128, 64, 3, 1, 1, bias=True)
+        self.conv4 = nn.Conv2d(64, 3*4 ** 2, 3, 1, 1, bias=True)
+
+        if self.bn:
+            self.bn1 = nn.BatchNorm2d(64)
+            self.bn2 = nn.BatchNorm2d(128)
+            self.bn3 = nn.BatchNorm2d(64)
+
+        self.pixel_shuffle = nn.PixelShuffle(4)
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+
+        if self.bn:
+            x = self.bn1(self.relu(self.conv1(x)))
+            x = self.dropout(self.bn2(self.relu(self.conv2(x))))
+            x = self.dropout(self.bn3(self.relu(self.conv3(x))))
+        
+        else:
+            x = self.relu(self.conv1(x))
+            x = self.dropout(self.relu(self.conv2(x)))
+            x = self.dropout(self.relu(self.conv3(x)))
+
+        x = self.pixel_shuffle(self.conv4(x))
+        x = self.tanh(x)
+        return x
+
 # Create model objects
-netG = SRGAN_G(nc, ngpu, opt.bn)
+netG = SRGAN_G(nc, ngpu, opt.bn, opt.nonlinearity)
 netG.apply(weights_init)
 netG.train()
 
-netD = SRGAN_D(nc, ngpu, opt.bn)
+netD = SRGAN_D(nc, ngpu, opt.bn, opt.nonlinearity)
 netD.apply(weights_init)
 netD.train()
 
