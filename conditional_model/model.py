@@ -16,6 +16,9 @@ from torch.autograd import Variable
 from PIL import Image
 import numpy as np
 from dataloader import srData, pil_loader, name_list
+import torch.nn.parallel
+import torch.backends.cudnn as cudnn
+cudnn.benchmark = True
 
 
 # generator
@@ -52,7 +55,8 @@ class net_g(nn.Module):
 
 
 # discriminator
-    
+# fix architecture ***
+
 class net_d(nn.Module):
     """
     Discriminator
@@ -65,19 +69,23 @@ class net_d(nn.Module):
 #         self.conv6 = nn.Conv2d(32, 3, (3, 3), (1, 1), (1, 1))
 #         self.lin1 = nn.Linear(256, 1)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout2d(p=0.9)
+        self.dropout = nn.Dropout2d(p=0.5)
         self.conv5 = nn.Conv1d(2000, 512, 2)
         self.conv6 = nn.Conv1d(256, 32, 2)
         self.lin0 = nn.Linear(196608, 2000)
-
-
-    def forward(self, data):
+        self.batchnorm=nn.BatchNorm2d(6)
+        
+    def forward(self, data, batchnorm=False):
 #         x = data
 #         x = self.dropout(x)
 #         x = self.relu(self.conv5(x))
 #         x = self.relu(self.conv6(x))
 #         x = self.lin1(x)
-        x = data.view(32,2,-1)
+        if batchnorm:
+            x = self.batchnorm(data)
+        else:
+            x = data
+        x = x.view(32,2,-1)
         x = self.lin0(x)
         x = self.dropout(x)
         x = x.view(32, 2000, -1)
@@ -85,3 +93,28 @@ class net_d(nn.Module):
         x = self.relu(self.conv6(x.view(32, 256, -1)))
 
         return nn.functional.sigmoid(x.view((32, -1)))
+
+
+
+
+
+"""
+class net_d(nn.Module):
+    def __init__(self):
+        super(net_d, self).__init__()
+        self.relu = nn.ReLU()
+        self.conv5 = nn.Conv2d(6, 32, (5, 5), (1, 1), (2, 2))
+        self.conv6 = nn.Conv2d(32, 3, (3, 3), (1, 1), (1, 1))
+        self.lin1 = nn.Linear(256, 1)
+
+        
+    def forward(self, data):
+        x = self.relu(self.conv5(data))
+        x = self.relu(self.conv6(x))
+        x = self.lin1(x)
+        return nn.functional.sigmoid(x.view((32, -1)))
+
+    
+"""
+
+
