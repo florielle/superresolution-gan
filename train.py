@@ -40,8 +40,9 @@ parser.add_argument('--experiment', default=None, help='Where to store samples a
 parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is rmsprop)')
 parser.add_argument('--init', type=str, default='normal', help='initialization method (normal, xavier, kaiming)')
 parser.add_argument('--Dweight', type=float, default=1.0, help='weighting for G loss from D') 
-parser.add_argument('--bn', action='store_true', help='Whether to use batch norm or not')
 parser.add_argument('--nonlinearity', type=str, default='relu', help='Nonlinearity to use (selu, prelu, leaky, relu)')
+parser.add_argument('--resizeConv', action='store_true', help='Whether to use resize convolution layers in the generator')
+parser.add_argument('--dropout', type=float, default=0.5, help='Percent dropout, default = 0.5')
 opt = parser.parse_args()
 print(opt)
 
@@ -82,127 +83,134 @@ nc = int(opt.nc)
 if opt.init not in ['normal', 'xavier', 'kaiming']:
     print('Initialization method not found, defaulting to normal')
 
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        if opt.init == 'xavier':
-            m.weight.data = init.xavier_normal(m.weight.data)
-        elif opt.init == 'kaiming':
-            m.weight.data = init.kaiming_normal(m.weight.data)
-        else:
-            m.weight.data.normal_(0.0, 0.02)
-        
-        m.bias.data.fill_(0)
+def init_model(model):
+    for m in model.modules():
+        if isinstance(m,nn.Conv2d):
+            if opt.init == 'xavier':
+                m.weight.data = init.xavier_normal(m.weight.data)
+            elif opt.init == 'kaiming':
+                m.weight.data = init.kaiming_normal(m.weight.data)
+            else:
+                m.weight.data.normal_(0.0, 0.02)
+            
+            m.bias.data.fill_(0)
 
-    elif classname.find('BatchNorm') != -1:
-        if opt.init == 'xavier':
-            m.weight.data = init.xavier_normal(m.weight.data)
-        elif opt.init == 'kaiming':
-            m.weight.data = init.kaiming_normal(m.weight.data)
-        else:
-            m.weight.data.normal_(1.0, 0.02)
-        
-        m.bias.data.fill_(0)
+        elif isinstance(m,nn.BatchNorm2d):
+            if opt.init == 'xavier':
+                m.weight.data = init.xavier_normal(m.weight.data)
+            elif opt.init == 'kaiming':
+                m.weight.data = init.kaiming_normal(m.weight.data)
+            else:
+                m.weight.data.normal_(1.0, 0.02)
+            
+            m.bias.data.fill_(0)
 
-# Define model
+"""
+Define model
+"""
+
+# Return the correct nonlinearity based on argument
+def which_relu():
+    if opt.nonlinearity == 'selu':
+        return nn.SELU()
+    elif opt.nonlinearity == 'prelu':
+        return nn.PReLU()
+    elif opt.nonlinearity == 'leaky':
+        return nn.LeakyReLU()
+    else:
+        return nn.ReLU()
+
+# Basic conv -> bn -> relu -> pool -> dropout module
+class BasicConv2d_D(nn.Module):
+
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super(BasicConv2d_D, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+        self.relu = which_relu()
+        self.dropout = nn.Dropout(p=opt.dropout)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.relu(x)
+        x = self.bn(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout(x)
+        return x
+
+# Basic conv -> bn -> relu -> dropout module
+class BasicConv2d_G(nn.Module):
+
+    def __init__(self, in_channels, out_channels, **kwargs):
+        super(BasicConv2d_G, self).__init__()
+        
+        if opt.resizeConv:
+            self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
+            self.pool = nn.AvgPool2d(2)
+        
+        self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
+        self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+        self.relu = which_relu()
+        self.dropout = nn.Dropout(opt.dropout)
+
+    def forward(self, x):
+
+        if opt.resizeConv:
+            x = self.pool(self.conv(self.upsample(x)))
+        else:
+            x = self.conv(x)
+
+        x = self.relu(x)
+        x = self.bn(x)
+        x = self.dropout(x)
+        return x
+
 class SRGAN_D(nn.Module):
-    def __init__(self, nc, ngpu, bn, nonlinearity):
+    def __init__(self, nc, ngpu):
         super(SRGAN_D, self).__init__()
-        self.bn = bn
         self.ngpu = ngpu
-
-        if nonlinearity == 'selu':
-            self.relu = nn.SELU()
-        elif nonlinearity == 'prelu':
-            self.relu = nn.PReLU()
-        elif nonlinearity == 'leaky':
-            self.relu = nn.LeakyReLU()
-        else:
-            self.relu = nn.ReLU()
-
-        self.dropout = nn.Dropout()
-        self.conv1 = nn.Conv2d(nc, 64, 4, 2, 1, bias=True)
-        self.conv2 = nn.Conv2d(64, 128, 4, 2, 1, bias=True)
-        self.conv3 = nn.Conv2d(128, 64, 4, 2, 1, bias=True)
-        self.conv4 = nn.Conv2d(64, 32, 4, 2, 1, bias=True)
-        
-        if self.bn:
-            self.bn1 = nn.BatchNorm2d(64)
-            self.bn2 = nn.BatchNorm2d(128)
-            self.bn3 = nn.BatchNorm2d(64)
-            self.bn4 = nn.BatchNorm2d(32)
-
+        self.conv1 = BasicConv2d_D(nc, 32, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv2 = BasicConv2d_D(32, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv3 = BasicConv2d_D(64, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv4 = BasicConv2d_D(64, 32, kernel_size=3, stride=1, padding=1, bias=True)
         self.linear = nn.Linear(8192, 1)
 
     def forward(self, x):
-        if self.bn:
-            x = self.bn1(self.relu(self.conv1(x)))
-            x = self.dropout(self.bn2(self.relu(self.conv2(x))))
-            x = self.dropout(self.bn3(self.relu(self.conv3(x))))
-            x = self.bn4(self.relu(self.conv4(x)))
-        else:
-            x = self.relu(self.conv1(x))
-            x = self.dropout(self.relu(self.conv2(x)))
-            x = self.dropout(self.relu(self.conv3(x)))
-            x = self.relu(self.conv4(x))
-
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
         x = x.view(x.size(0), -1)
         x = self.linear(x)
-        
         return x
 
 class SRGAN_G(nn.Module):
-    def __init__(self, nc, ngpu, bn, nonlinearity):
+    def __init__(self, nc, ngpu):
         super(SRGAN_G, self).__init__()
-        self.bn = bn
         self.ngpu = ngpu
-
-        if nonlinearity == 'selu':
-            self.relu = nn.SELU()
-        elif nonlinearity == 'prelu':
-            self.relu = nn.PReLU()
-        elif nonlinearity == 'leaky':
-            self.relu = nn.LeakyReLU()
-        else:
-            self.relu = nn.ReLU()
-
-        self.dropout = nn.Dropout()
-        self.conv1 = nn.Conv2d(nc, 64, 5, 1, 2, bias=True)
-        self.conv2 = nn.Conv2d(64, 128, 3, 1, 1, bias=True)
-        self.conv3 = nn.Conv2d(128, 64, 3, 1, 1, bias=True)
-        self.conv4 = nn.Conv2d(64, 3*4 ** 2, 3, 1, 1, bias=True)
-
-        if self.bn:
-            self.bn1 = nn.BatchNorm2d(64)
-            self.bn2 = nn.BatchNorm2d(128)
-            self.bn3 = nn.BatchNorm2d(64)
-
+        self.conv1 = BasicConv2d_G(nc, 32, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv2 = BasicConv2d_G(32, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv3 = BasicConv2d_G(64, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv4 = BasicConv2d_G(64, 3 * 4**2, kernel_size=3, stride=1, padding=1, bias=True)
         self.pixel_shuffle = nn.PixelShuffle(4)
         self.tanh = nn.Tanh()
 
     def forward(self, x):
-
-        if self.bn:
-            x = self.bn1(self.relu(self.conv1(x)))
-            x = self.dropout(self.bn2(self.relu(self.conv2(x))))
-            x = self.dropout(self.bn3(self.relu(self.conv3(x))))
-        
-        else:
-            x = self.relu(self.conv1(x))
-            x = self.dropout(self.relu(self.conv2(x)))
-            x = self.dropout(self.relu(self.conv3(x)))
-
-        x = self.pixel_shuffle(self.conv4(x))
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.pixel_shuffle(x)
         x = self.tanh(x)
         return x
 
 # Create model objects
-netG = SRGAN_G(nc, ngpu, opt.bn, opt.nonlinearity)
-netG.apply(weights_init)
+netG = SRGAN_G(nc, ngpu)
+init_model(netG)
 netG.train()
 
-netD = SRGAN_D(nc, ngpu, opt.bn, opt.nonlinearity)
-netD.apply(weights_init)
+netD = SRGAN_D(nc, ngpu)
+init_model(netD)
 netD.train()
 
 # Define MSE loss module
@@ -216,7 +224,6 @@ print(netG)
 if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
 print(netD)
-
 
 if opt.cuda:
     netD.cuda()
@@ -314,7 +321,6 @@ for epoch in range(opt.niter+1):
         experiment.log_metric("MSE loss", loss_MSE.data[0])
         experiment.log_metric("Loss G", errG.data[0])
         experiment.log_metric("Loss D", errD.data[0])
-
 
         print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f, MSE_Loss: %f'
             % (epoch, opt.niter, i, len(dataloader), gen_iterations,
