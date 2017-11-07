@@ -13,7 +13,7 @@ def name_list(directory):
     names = []
     
     for filename in os.listdir(directory): 
-        if filename.endswith(".jpg"):
+        if filename.endswith(".png"):
             names.append(filename)
     return names
 
