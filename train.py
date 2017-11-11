@@ -17,6 +17,7 @@ import numpy as np
 from PIL import Image
 from dataloader import *
 from comet_ml import Experiment
+import pytorch_ssim
 
 """
 Options for training
@@ -96,13 +97,7 @@ def init_model(model):
             m.bias.data.fill_(0)
 
         elif isinstance(m,nn.BatchNorm2d):
-            if opt.init == 'xavier':
-                m.weight.data = init.xavier_normal(m.weight.data)
-            elif opt.init == 'kaiming':
-                m.weight.data = init.kaiming_normal(m.weight.data)
-            else:
-                m.weight.data.normal_(1.0, 0.02)
-            
+            m.weight.data.normal_(1.0, 0.02)
             m.bias.data.fill_(0)
 
 """
@@ -146,7 +141,6 @@ class BasicConv2d_G(nn.Module):
         
         if opt.resizeConv:
             self.upsample = nn.Upsample(scale_factor=2, mode='nearest')
-            self.pool = nn.AvgPool2d(2)
         
         self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
         self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
@@ -156,7 +150,7 @@ class BasicConv2d_G(nn.Module):
     def forward(self, x):
 
         if opt.resizeConv:
-            x = self.pool(self.conv(self.upsample(x)))
+            x = F.avg_pool2d(self.conv(self.upsample(x)),2)
         else:
             x = self.conv(x)
 
@@ -169,17 +163,19 @@ class SRGAN_D(nn.Module):
     def __init__(self, nc, ngpu):
         super(SRGAN_D, self).__init__()
         self.ngpu = ngpu
-        self.conv1 = BasicConv2d_D(nc, 32, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv1 = BasicConv2d_D(nc, 32, kernel_size=5, stride=1, padding=2, bias=True)
         self.conv2 = BasicConv2d_D(32, 64, kernel_size=3, stride=1, padding=1, bias=True)
-        self.conv3 = BasicConv2d_D(64, 64, kernel_size=3, stride=1, padding=1, bias=True)
-        self.conv4 = BasicConv2d_D(64, 32, kernel_size=3, stride=1, padding=1, bias=True)
-        self.linear = nn.Linear(8192, 1)
+        self.conv3 = BasicConv2d_D(64, 128, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv4 = BasicConv2d_D(128, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv5 = BasicConv2d_D(64, 32, kernel_size=3, stride=1, padding=1, bias=True)
+        self.linear = nn.Linear(2048, 1)
 
     def forward(self, x):
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
         x = self.conv4(x)
+        x = self.conv5(x)
         x = x.view(x.size(0), -1)
         x = self.linear(x)
         return x
@@ -188,10 +184,11 @@ class SRGAN_G(nn.Module):
     def __init__(self, nc, ngpu):
         super(SRGAN_G, self).__init__()
         self.ngpu = ngpu
-        self.conv1 = BasicConv2d_G(nc, 32, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv1 = BasicConv2d_G(nc, 32, kernel_size=5, stride=1, padding=2, bias=True)
         self.conv2 = BasicConv2d_G(32, 64, kernel_size=3, stride=1, padding=1, bias=True)
-        self.conv3 = BasicConv2d_G(64, 64, kernel_size=3, stride=1, padding=1, bias=True)
-        self.conv4 = BasicConv2d_G(64, 3 * 4**2, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv3 = BasicConv2d_G(64, 128, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv4 = BasicConv2d_G(128, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv5 = BasicConv2d_G(64, 3 * 4**2, kernel_size=3, stride=1, padding=1, bias=True)
         self.pixel_shuffle = nn.PixelShuffle(4)
         self.tanh = nn.Tanh()
 
@@ -200,6 +197,7 @@ class SRGAN_G(nn.Module):
         x = self.conv2(x)
         x = self.conv3(x)
         x = self.conv4(x)
+        x = self.conv5(x)
         x = self.pixel_shuffle(x)
         x = self.tanh(x)
         return x
@@ -215,6 +213,9 @@ netD.train()
 
 # Define MSE loss module
 MSE = nn.MSELoss()
+
+# Define SSIM loss module
+ssim_loss = pytorch_ssim.SSIM(window_size = 11)
 
 # Load checkpoint models if needed
 if opt.netG != '': 
@@ -312,15 +313,12 @@ for epoch in range(opt.niter+1):
 
         # generator accumulates loss from discriminator + MSE with true image
         loss_MSE = MSE(fake, input_hr)
-        loss_G = opt.Dweight*errG + loss_MSE
+        loss_SSIM = ssim_loss(fake, input_hr)
+        loss_G = opt.Dweight*errG + loss_MSE - loss_SSIM
         loss_G.backward()
 
         optimizerG.step()
         gen_iterations += 1
-
-        experiment.log_metric("MSE loss", loss_MSE.data[0])
-        experiment.log_metric("Loss G", errG.data[0])
-        experiment.log_metric("Loss D", errD.data[0])
 
         print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f, MSE_Loss: %f'
             % (epoch, opt.niter, i, len(dataloader), gen_iterations,
@@ -331,6 +329,13 @@ for epoch in range(opt.niter+1):
             fake = netG(Variable(lr, volatile=True))
             netG.train()
             vutils.save_image(fake.data, '{0}/images/{1}_fake.png'.format(opt.experiment, gen_iterations), normalize=True)
+
+    # Send to comet only once per epoch
+    experiment.log_metric("MSE loss", loss_MSE.data[0])
+    experiment.log_metric("SSIM loss", loss_SSIM.data[0])
+    experiment.log_metric("Generator loss", errG.data[0])
+    experiment.log_metric("Discriminator loss", errD.data[0])
+
 
     # do checkpointing
     if epoch % 100 == 0:
